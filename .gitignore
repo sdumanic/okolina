@@ -1,0 +1,17 @@
+# Arduino / build artefakti
+build/
+*.bin
+*.elf
+*.map
+*.hex
+.pio/
+.vscode/
+
+# Windows
+Thumbs.db
+Desktop.ini
+*.lnk
+
+# Editor
+*.swp
+*~
