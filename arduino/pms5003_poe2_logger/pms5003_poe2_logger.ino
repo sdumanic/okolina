@@ -939,7 +939,7 @@ button:hover{background:#f0f3f7}
     <label class="kv">Raspon:
       <select id="range">
         <option value="0">sve</option>
-        <option value="300">zadnjih 5 min</option>
+        <option value="300" selected>zadnjih 5 min</option>
         <option value="1800">zadnjih 30 min</option>
         <option value="3600">zadnji 1 h</option>
         <option value="21600">zadnjih 6 h</option>
@@ -1053,7 +1053,7 @@ var selFile = "";
 var lastCount = -1;
 var rows = [];
 var srcLabel = "NTP";
-var rangeSec = 0;
+var rangeSec = 300;                 // zadani raspon: zadnjih 5 min
 var odEpoch = 0;
 var doEpoch = 0;
 var mode = "file";
@@ -1449,6 +1449,9 @@ window.addEventListener("load", function(){
     if (sp !== null) {
       q("range").value = sp;
       rangeSec = parseInt(sp, 10) || 0;
+    } else {
+      q("range").value = "300";
+      rangeSec = 300;
     }
   } catch (e) {}
 
