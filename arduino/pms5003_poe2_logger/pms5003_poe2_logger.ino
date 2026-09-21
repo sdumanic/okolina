@@ -1,4 +1,4 @@
-/*
+﻿/*
   ESP32-POE2 + PMS5003 + microSD + NTP + web server + Wi-Fi AP
   ============================================================
 
@@ -105,6 +105,7 @@
 // ---- Web server i graf ----
 #define WEB_PORT                80
 #define LOG_RING_MAX            500     // koliko zapisa se drzi u RAM-u za graf
+#define HIST_MAX                3000    // max zapisa za povijesni upit preko vise datoteka
 
 // ---- OTA (update preko mreze) ----
 #define OTA_ENABLE      1
@@ -388,6 +389,183 @@ static bool ucitajUPrsten(const String &datoteka) {
     }
   }
   f.close();
+  return true;
+}
+
+// ====================== POVIJESNI UPIT (VISE DATOTEKA) ======================
+//
+// Za odabrani vremenski raspon cita sve CSV datoteke koje ga pokrivaju,
+// filtrira zapise po vremenu i vraca ih sortirane. Ako zapisa ima vise od
+// HIST_MAX, buffer se prepolovi i dalje se prima svaki drugi zapis
+// (ravnomjerna decimacija) - tako graf uvijek pokrije cijeli raspon.
+
+static LogRow  *histBuf      = nullptr;   // u PSRAM-u ako ima mjesta
+static int      histCount    = 0;
+static int      histDecim    = 1;
+static int      histCnt2     = 0;
+static uint32_t histUkupno   = 0;         // zapisa u rasponu (prije decimacije)
+static String   histDatoteke = "";
+
+static bool histOsiguraj() {
+  if (histBuf == nullptr) {
+    histBuf = (LogRow *)ps_malloc(sizeof(LogRow) * HIST_MAX);
+    if (histBuf == nullptr) {
+      histBuf = (LogRow *)malloc(sizeof(LogRow) * HIST_MAX);
+    }
+  }
+  return histBuf != nullptr;
+}
+
+static void histReset() {
+  histCount    = 0;
+  histDecim    = 1;
+  histCnt2     = 0;
+  histUkupno   = 0;
+  histDatoteke = "";
+}
+
+static void histPush(const LogRow &r) {
+  histUkupno++;
+  if (histBuf == nullptr) {
+    return;
+  }
+  if (histCount >= HIST_MAX) {
+    int w = 0;
+    for (int i = 0; i < histCount; i += 2) {
+      histBuf[w++] = histBuf[i];
+    }
+    histCount = w;
+    histDecim *= 2;
+    histCnt2 = 0;
+  }
+  if (histCnt2 == 0) {
+    histBuf[histCount++] = r;
+  }
+  histCnt2 = (histCnt2 + 1) % histDecim;
+}
+
+static int cmpLogRow(const void *a, const void *b) {
+  uint32_t ta = ((const LogRow *)a)->ts;
+  uint32_t tb = ((const LogRow *)b)->ts;
+  if (ta < tb) return -1;
+  if (ta > tb) return 1;
+  return 0;
+}
+
+// YYYYMMDD iz epocha (lokalno vrijeme); 0 ako epoch nije valjan
+static int datumKljuc(uint32_t epoch) {
+  if (epoch < NTP_EPOCH_MIN) {
+    return 0;
+  }
+  struct tm t;
+  time_t tt = (time_t)epoch;
+  localtime_r(&tt, &t);
+  return (t.tm_year + 1900) * 10000 + (t.tm_mon + 1) * 100 + t.tm_mday;
+}
+
+// YYYYMMDD iz imena /pms_YYYYMMDD_HHMMSS.csv; 0 ako ime nema datum
+static int imeDatumKljuc(const String &ime) {
+  int p = ime.indexOf(CSV_PREFIX);
+  if (p < 0) {
+    return 0;
+  }
+  int s = p + (int)strlen(CSV_PREFIX);
+  if ((int)ime.length() < s + 8) {
+    return 0;
+  }
+  for (int i = 0; i < 8; i++) {
+    char ch = ime[s + i];
+    if (ch < '0' || ch > '9') {
+      return 0;
+    }
+  }
+  return ime.substring(s, s + 8).toInt();
+}
+
+static bool ucitajRaspon(uint32_t od, uint32_t doVrijeme) {
+  if (sdFs == nullptr || !histOsiguraj()) {
+    return false;
+  }
+  histReset();
+
+  int kljucOd = 0;
+  int kljucDo = 0;
+  if (od >= NTP_EPOCH_MIN) {
+    kljucOd = datumKljuc(od > 172800UL ? (od - 172800UL) : 0);
+    uint32_t gornja = (doVrijeme == 0) ? (epochVrijedi() ? (uint32_t)time(nullptr) : od) : doVrijeme;
+    kljucDo = datumKljuc(gornja + 86400UL);
+  }
+
+  String kandidati[64];
+  int    nKandidata = 0;
+
+  File root = sdFs->open("/");
+  if (!root || !root.isDirectory()) {
+    return false;
+  }
+  File f = root.openNextFile();
+  while (f && nKandidata < 64) {
+    if (!f.isDirectory()) {
+      String ime = String(f.name());
+      if (!ime.startsWith("/")) {
+        ime = "/" + ime;
+      }
+      if (ime.indexOf(".csv") > 0 && ime.indexOf(CSV_PREFIX) >= 0) {
+        bool ukljuci;
+        if (od >= NTP_EPOCH_MIN) {
+          int fk = imeDatumKljuc(ime);
+          ukljuci = (fk != 0) && (fk >= kljucOd) && (fk <= kljucDo);
+        } else {
+          ukljuci = (imeDatumKljuc(ime) == 0);   // MILLIS datoteke
+        }
+        if (ukljuci) {
+          kandidati[nKandidata++] = ime;
+        }
+      }
+    }
+    f = root.openNextFile();
+  }
+  root.close();
+
+  for (int i = 0; i < nKandidata; i++) {
+    uint32_t prijeDatoteke = histUkupno;
+    File g = sdFs->open(kandidati[i], FILE_READ);
+    if (!g) {
+      continue;
+    }
+    while (g.available()) {
+      String line = g.readStringUntil('\n');
+      line.trim();
+      if (line.length() < 8) continue;
+      if (line[0] < '0' || line[0] > '9') continue;
+
+      unsigned long ts = 0;
+      unsigned a = 0, b = 0, c2 = 0;
+      char izv[16] = {0};
+      if (sscanf(line.c_str(), "%lu,%15[^,],%u,%u,%u", &ts, izv, &a, &b, &c2) == 5) {
+        if ((od == 0 || ts >= od) && (doVrijeme == 0 || ts <= doVrijeme)) {
+          LogRow r;
+          r.ts    = (uint32_t)ts;
+          r.pm1   = (uint16_t)a;
+          r.pm25  = (uint16_t)b;
+          r.pm100 = (uint16_t)c2;
+          histPush(r);
+        }
+      }
+    }
+    g.close();
+
+    if (histUkupno > prijeDatoteke && histDatoteke.length() < 120) {
+      if (histDatoteke.length() > 0) {
+        histDatoteke += ",";
+      }
+      histDatoteke += kandidati[i];
+    }
+  }
+
+  if (histCount > 1) {
+    qsort(histBuf, histCount, sizeof(LogRow), cmpLogRow);
+  }
   return true;
 }
 
@@ -878,6 +1056,13 @@ var srcLabel = "NTP";
 var rangeSec = 0;
 var odEpoch = 0;
 var doEpoch = 0;
+var mode = "file";
+var boardEpoch = 0;
+var currentFile = "";
+var rangeFrom = 0;
+var rangeTo = 0;
+var lastRangeLoad = 0;
+var rangeInicijaliziran = false;
 
 function q(id){ return document.getElementById(id); }
 function getJSON(u){ return fetch(u, {cache:"no-store"}).then(function(r){ return r.json(); }); }
@@ -894,11 +1079,35 @@ function fmtShort(ts){
 
 function imaEpochVrijeme(){ return (srcLabel === "NTP" || srcLabel === "RUCNO"); }
 
+function fmtFull(ts){
+  if (imaEpochVrijeme() && ts > 1000000000) {
+    var d = new Date(ts*1000);
+    return ("0"+d.getDate()).slice(-2)+"."+("0"+(d.getMonth()+1)).slice(-2)+"."+d.getFullYear()+
+           " "+("0"+d.getHours()).slice(-2)+":"+("0"+d.getMinutes()).slice(-2)+":"+("0"+d.getSeconds()).slice(-2);
+  }
+  return (ts/1000).toFixed(0)+" s";
+}
+
+function fmtAxis(ts, span){
+  if (imaEpochVrijeme() && ts > 1000000000) {
+    var d = new Date(ts*1000);
+    if (span > 6*3600) {
+      return ("0"+d.getDate()).slice(-2)+"."+("0"+(d.getMonth()+1)).slice(-2)+" "+("0"+d.getHours()).slice(-2)+":"+("0"+d.getMinutes()).slice(-2);
+    }
+    return ("0"+d.getHours()).slice(-2)+":"+("0"+d.getMinutes()).slice(-2)+":"+("0"+d.getSeconds()).slice(-2);
+  }
+  return (ts/1000).toFixed(0)+"s";
+}
+
 function rangeLabel(){
+  if (rows.length > 1 && imaEpochVrijeme()) {
+    return fmtFull(rows[0][0]) + "  -  " + fmtFull(rows[rows.length-1][0]);
+  }
+  if (mode === "range" && rangeFrom) {
+    return fmtFull(rangeFrom) + "  -  " + (rangeTo ? fmtFull(rangeTo) : "sada");
+  }
   if (odEpoch || doEpoch) {
-    var a = odEpoch ? new Date(odEpoch*1000).toLocaleString() : "pocetak";
-    var b = doEpoch ? new Date(doEpoch*1000).toLocaleString() : "kraj";
-    return a + " - " + b;
+    return fmtFull(odEpoch) + "  -  " + (doEpoch ? fmtFull(doEpoch) : "kraj");
   }
   var el = q("range");
   return el.options[el.selectedIndex].text;
@@ -933,10 +1142,23 @@ function pollStatus(){
         ? (s.apSsid + "  " + s.apIp + "  kanal " + s.apKanal + "  klijenata: " + s.apKlijenti)
         : "iskljucena";
     prikaziStanjeSenzora(s);
+    if (s.epoch > 1000000000) { boardEpoch = s.epoch; }
+    currentFile = s.file;
     if (selFile === "") { selFile = s.file; q("file").textContent = selFile; }
+
+    if (!rangeInicijaliziran && rangeSec > 0 && boardEpoch > 0) {
+      rangeInicijaliziran = true;
+      mode = "range"; rangeFrom = boardEpoch - rangeSec; rangeTo = 0; rangeSec = 0;
+      loadRange();
+    }
+
     if (s.records !== lastCount) {
       lastCount = s.records;
-      if (selFile === s.file) { loadData(); }
+      if (mode === "range") {
+        if (rangeTo === 0 && boardEpoch > 0 && (Date.now()/1000 - lastRangeLoad) > 5) { loadRange(); }
+      } else if (selFile === s.file) {
+        loadData();
+      }
     }
   }).catch(function(){});
 }
@@ -977,6 +1199,24 @@ function pollCurrent(){
   }).catch(function(){});
 }
 
+function loadRange(){
+  var qs = "/api/data?from=" + rangeFrom + "&to=" + (rangeTo || 0);
+  getJSON(qs).then(function(d){
+    rows = d.rows || [];
+    srcLabel = d.source || "NTP";
+    lastRangeLoad = Date.now()/1000;
+    var nf = d.files ? d.files.split(",").length : 0;
+    var info = "povijest: " + nf + (nf === 1 ? " datoteka" : " datoteke");
+    if (d.files) { info += " (" + d.files + ")"; }
+    info += "  |  zapisa: " + rows.length;
+    if (d.decim > 1) { info += " od " + d.total + " (decimirano x" + d.decim + ")"; }
+    info += "  |  izvor vremena: " + srcLabel;
+    q("chartinfo").textContent = info;
+    q("file").textContent = "povijest";
+    draw();
+  }).catch(function(){});
+}
+
 function loadData(){
   getJSON("/api/data?f=" + encodeURIComponent(selFile)).then(function(d){
     rows = d.rows || [];
@@ -1010,6 +1250,9 @@ function loadFiles(){
       a1.onclick = function(e){
         e.preventDefault();
         selFile = f.name;
+        mode = "file";
+        odEpoch = 0; doEpoch = 0; rangeSec = 0; rangeFrom = 0; rangeTo = 0;
+        q("od").value = ""; q("do").value = ""; q("range").value = "0";
         lastCount = -1;
         q("file").textContent = selFile;
         loadData();
@@ -1070,7 +1313,7 @@ function drawChart(g, L, T, pw, ph, data, fs, lw){
   for (i = 0; i <= 4; i++) {
     t = xmin + (xmax - xmin) * i / 4; x = X(t);
     g.beginPath(); g.moveTo(x, T); g.lineTo(x, T + ph); g.stroke();
-    g.textAlign = "center"; g.fillText(fmtShort(Math.round(t)), x, T + ph + fs + 4);
+    g.textAlign = "center"; g.fillText(fmtAxis(Math.round(t), xmax - xmin), x, T + ph + fs + 4);
   }
 
   g.strokeStyle = "#aaa";
@@ -1131,9 +1374,8 @@ function draw(){
 
   var d = applyRange();
   var info = "prikazano " + d.length + " od " + rows.length + " zapisa";
-  if (d.length > 1) { info += "  |  raspon: " + fmtShort(d[0][0]) + " - " + fmtShort(d[d.length-1][0]); }
-  info += "  |  odabir: " + rangeLabel();
-  if (!imaEpochVrijeme() && (odEpoch || doEpoch)) { info += "  (vlastiti raspon radi samo za NTP/RUCNO zapise)"; }
+  if (d.length > 1) { info += "  |  raspon: " + fmtFull(d[0][0]) + "  -  " + fmtFull(d[d.length-1][0]); }
+  if (mode !== "range") { info += "  |  odabir: " + rangeLabel(); }
   q("rangeinfo").textContent = info;
 
   drawChart(g, 52, 26, w-52-10, h-26-28, d, 12, 2);
@@ -1168,20 +1410,36 @@ function exportPNG(){
 function primijeniVlastitiRaspon(){
   var od = q("od").value;
   var dov = q("do").value;
-  odEpoch = od ? Math.floor(new Date(od).getTime()/1000) : 0;
-  doEpoch = dov ? Math.floor(new Date(dov).getTime()/1000) : 0;
-  draw();
-}
+  var odEp = od ? Math.floor(new Date(od).getTime()/1000) : 0;
+  var doEp = dov ? Math.floor(new Date(dov).getTime()/1000) : 0;
 
-function ocistiRaspone(){
+  if (!odEp && !doEp) { ocistiRaspone(); return; }
+
+  /* povijesni upit na posluzitelju preko svih datoteka u rasponu */
+  mode = "range";
+  rangeFrom = odEp;
+  rangeTo = doEp;
   odEpoch = 0;
   doEpoch = 0;
   rangeSec = 0;
+  q("range").value = "0";
+  loadRange();
+}
+
+function ocistiRaspone(){
+  mode = "file";
+  odEpoch = 0;
+  doEpoch = 0;
+  rangeSec = 0;
+  rangeFrom = 0;
+  rangeTo = 0;
   q("od").value = "";
   q("do").value = "";
   q("range").value = "0";
   try { localStorage.setItem("pms_range", "0"); } catch(e) {}
-  draw();
+  if (currentFile) { selFile = currentFile; }
+  lastCount = -1;
+  loadData();
 }
 
 window.addEventListener("load", function(){
@@ -1199,7 +1457,20 @@ window.addEventListener("load", function(){
     odEpoch = 0; doEpoch = 0;
     q("od").value = ""; q("do").value = "";
     try { localStorage.setItem("pms_range", this.value); } catch (e) {}
-    draw();
+
+    if (rangeSec > 0 && boardEpoch > 0) {
+      /* podaci iz svih datoteka koje pokrivaju odabrani raspon */
+      mode = "range";
+      rangeFrom = boardEpoch - rangeSec;
+      rangeTo = 0;
+      rangeSec = 0;
+      loadRange();
+    } else {
+      mode = "file";
+      if (currentFile) { selFile = currentFile; }
+      lastCount = -1;
+      loadData();
+    }
   };
   q("primijeni").onclick = primijeniVlastitiRaspon;
   q("ocisti").onclick = ocistiRaspone;
@@ -1473,6 +1744,57 @@ static void handleStatus() {
 }
 
 static void handleData() {
+  String odArg = server.arg("from");
+  String doArg = server.arg("to");
+
+  // Povijesni upit: podaci iz svih datoteka koje pokrivaju odabrani raspon
+  if (odArg.length() > 0 || doArg.length() > 0) {
+    uint32_t od     = odArg.length() ? (uint32_t)strtoul(odArg.c_str(), nullptr, 10) : 0;
+    uint32_t doVrij = doArg.length() ? (uint32_t)strtoul(doArg.c_str(), nullptr, 10) : 0;
+    if (od > 0 && doVrij > 0 && doVrij < od) {
+      uint32_t t = od; od = doVrij; doVrij = t;
+    }
+
+    if (sdFs == nullptr || !ucitajRaspon(od, doVrij)) {
+      server.send(500, "application/json", "{\"error\":\"ne mogu citati karticu\"}");
+      return;
+    }
+
+    server.sendHeader("Cache-Control", "no-store");
+    server.setContentLength(CONTENT_LENGTH_UNKNOWN);
+    server.send(200, "application/json", "");
+
+    char buf[240];
+    snprintf(buf, sizeof(buf),
+             "{\"mode\":\"range\",\"from\":%lu,\"to\":%lu,\"source\":\"%s\","
+             "\"count\":%d,\"total\":%lu,\"decim\":%d,\"files\":\"%s\",\"rows\":[",
+             (unsigned long)od, (unsigned long)doVrij, izvorVremena(),
+             histCount, (unsigned long)histUkupno, histDecim, histDatoteke.c_str());
+    server.sendContent(buf);
+
+    char red[96];
+    size_t pos = 0;
+    for (int i = 0; i < histCount; i++) {
+      snprintf(red, sizeof(red), "%s[%lu,%u,%u,%u]",
+               (i == 0 ? "" : ","),
+               (unsigned long)histBuf[i].ts, histBuf[i].pm1, histBuf[i].pm25, histBuf[i].pm100);
+      size_t lr = strlen(red);
+      if (pos + lr > sizeof(buf) - 1) {
+        buf[pos] = 0;
+        server.sendContent(buf);
+        pos = 0;
+      }
+      memcpy(buf + pos, red, lr);
+      pos += lr;
+    }
+    if (pos > 0) {
+      buf[pos] = 0;
+      server.sendContent(buf);
+    }
+    server.sendContent("]}");
+    server.sendContent("");
+    return;
+  }
   String datoteka = server.arg("f");
   if (datoteka.length() == 0) {
     datoteka = String(csvPath);
