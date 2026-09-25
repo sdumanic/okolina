@@ -149,6 +149,7 @@ struct DeviceSettings {
   char    apPassword[65];
   uint8_t apChannel;
   char    ntpServer[64];
+  char    theme[16];
 };
 
 static DeviceSettings settings;
@@ -298,6 +299,7 @@ static void loadSettings() {
   strlcpy(settings.apPassword,  DEF_AP_PASSWORD,  sizeof(settings.apPassword));
   settings.apChannel = DEF_AP_CHANNEL;
   strlcpy(settings.ntpServer,   NTP_SERVER,       sizeof(settings.ntpServer));
+  strlcpy(settings.theme,       "light",          sizeof(settings.theme));
 
   if (!prefs.begin(NVS_NAMESPACE, true)) {
     return;                                   // no stored settings
@@ -314,6 +316,7 @@ static void loadSettings() {
   s = prefs.getString("apssid",   settings.apSsid);      strlcpy(settings.apSsid,     s.c_str(), sizeof(settings.apSsid));
   s = prefs.getString("aploz",    settings.apPassword);  strlcpy(settings.apPassword, s.c_str(), sizeof(settings.apPassword));
   s = prefs.getString("ntp",      settings.ntpServer);   strlcpy(settings.ntpServer,  s.c_str(), sizeof(settings.ntpServer));
+  s = prefs.getString("theme",    settings.theme);      strlcpy(settings.theme,      s.c_str(), sizeof(settings.theme));
   prefs.end();
 
   if (settings.apChannel < 1 || settings.apChannel > 13) {
@@ -336,6 +339,7 @@ static void saveSettings() {
   prefs.putString("apssid",   settings.apSsid);
   prefs.putString("aploz",    settings.apPassword);
   prefs.putString("ntp",      settings.ntpServer);
+  prefs.putString("theme",    settings.theme);
   prefs.end();
 }
 
@@ -884,11 +888,27 @@ static const char PAGE_HTML[] PROGMEM = R"HTML(<!DOCTYPE html>
 <style>
 :root{
   --bg:#f5f7fa; --card:#ffffff; --text:#111827; --muted:#6b7280; --line:#e5e7eb;
+  --line-soft:#f1f2f4; --hover:#fafbfc;
   --accent:#2563eb; --accent-dark:#1d4ed8; --accent-soft:#eef4ff;
   --ok:#15803d; --warn:#b45309; --err:#b91c1c;
   --pm1:#16a34a; --pm25:#ea580c; --pm10:#dc2626;
   --r:14px; --sh:0 1px 2px rgba(16,24,40,.05),0 10px 28px rgba(16,24,40,.06);
 }
+body.theme-dark{
+  --bg:#0f1319; --card:#171d26; --text:#e7ebf2; --muted:#94a3b8; --line:#252d3a;
+  --line-soft:#1f2733; --hover:#1d2430;
+  --accent:#4f8cff; --accent-dark:#3a74e6; --accent-soft:#1b2534;
+  --pm1:#22c55e; --pm25:#f97316; --pm10:#ef4444;
+  --sh:0 1px 2px rgba(0,0,0,.5),0 12px 30px rgba(0,0,0,.45);
+}
+body.theme-contrast{
+  --bg:#000000; --card:#000000; --text:#ffffff; --muted:#ffd400; --line:#ffffff;
+  --line-soft:#3a3a3a; --hover:#141414;
+  --accent:#00e5ff; --accent-dark:#00b8cc; --accent-soft:#00323a;
+  --pm1:#00ff66; --pm25:#ffcc00; --pm10:#ff3b30;
+  --sh:none;
+}
+body.theme-contrast .card,body.theme-contrast .val{border-width:2px}
 *{box-sizing:border-box}
 body{margin:0;padding:18px;background:var(--bg);color:var(--text);
   font:14px/1.55 system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;-webkit-font-smoothing:antialiased}
@@ -899,10 +919,10 @@ h1{display:flex;align-items:center;flex-wrap:wrap;gap:8px 14px;font-size:20px;fo
 .kv b{color:var(--text);font-weight:600}
 .tag{display:inline-block;padding:2px 10px;border-radius:999px;background:var(--accent-soft);color:var(--accent-dark);font-size:12px;font-weight:600}
 .ctrl{display:flex;flex-wrap:wrap;gap:10px 14px;align-items:center;margin:4px 0 10px}
-select,input[type=datetime-local]{font:inherit;font-size:13px;padding:7px 10px;border:1px solid var(--line);border-radius:10px;background:#fff;color:var(--text)}
+select,input[type=datetime-local]{font:inherit;font-size:13px;padding:7px 10px;border:1px solid var(--line);border-radius:10px;background:var(--card);color:var(--text)}
 select:focus,input:focus{outline:2px solid var(--accent-soft);border-color:var(--accent)}
-button{font:inherit;font-size:13px;font-weight:600;padding:8px 14px;border:1px solid var(--line);border-radius:10px;background:#fff;color:var(--text);cursor:pointer;transition:.15s}
-button:hover{background:#f3f4f6;border-color:#d1d5db}
+button{font:inherit;font-size:13px;font-weight:600;padding:8px 14px;border:1px solid var(--line);border-radius:10px;background:var(--card);color:var(--text);cursor:pointer;transition:.15s}
+button:hover{background:var(--hover);border-color:var(--accent)}
 button:active{transform:translateY(1px)}
 #apply{background:var(--accent);border-color:var(--accent);color:#fff}
 #apply:hover{background:var(--accent-dark);border-color:var(--accent-dark)}
@@ -913,9 +933,9 @@ a:hover{text-decoration:underline}
 .help:hover{color:var(--accent)}
 .muted{color:var(--muted);font-size:12px}
 .stale{opacity:.45}
-canvas{width:100%;height:320px;display:block;border:1px solid var(--line);border-radius:12px;background:#fff}
+canvas{width:100%;height:320px;display:block;border:1px solid var(--line);border-radius:12px;background:var(--card)}
 .vals{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:12px;margin-top:8px}
-.val{background:#fff;border:1px solid var(--line);border-radius:12px;padding:10px 12px;border-top:3px solid var(--line)}
+.val{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:10px 12px;border-top:3px solid var(--line)}
 .val .muted{font-size:11.5px;text-transform:uppercase;letter-spacing:.05em}
 .big{font-size:30px;font-weight:700;line-height:1.15;font-variant-numeric:tabular-nums}
 #cvals .val:nth-child(1){border-top-color:var(--pm1)}
@@ -923,13 +943,13 @@ canvas{width:100%;height:320px;display:block;border:1px solid var(--line);border
 #cvals .val:nth-child(3){border-top-color:var(--pm10)}
 table{border-collapse:separate;border-spacing:0;width:100%;font-size:13.5px}
 th{text-align:left;font-size:11.5px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);font-weight:600;padding:8px 10px;border-bottom:1px solid var(--line)}
-td{padding:9px 10px;border-bottom:1px solid #f1f2f4;vertical-align:middle}
-tbody tr:hover td{background:#fafbfc}
+td{padding:9px 10px;border-bottom:1px solid var(--line-soft);vertical-align:middle}
+tbody tr:hover td{background:var(--hover)}
 tbody tr:last-child td{border-bottom:none}
 .modal{display:none;position:fixed;inset:0;background:rgba(15,23,42,.5);z-index:10;padding:18px;overflow:auto;-webkit-backdrop-filter:blur(2px);backdrop-filter:blur(2px)}
 .modal.open{display:block}
-.modalbox{background:#fff;border-radius:16px;max-width:820px;margin:0 auto;overflow:hidden;box-shadow:0 24px 60px rgba(16,24,40,.28)}
-.modalhead{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:14px 18px;border-bottom:1px solid var(--line);background:#fbfcfe}
+.modalbox{background:var(--card);border:1px solid var(--line);border-radius:16px;max-width:820px;margin:0 auto;overflow:hidden;box-shadow:0 24px 60px rgba(0,0,0,.35)}
+.modalhead{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:14px 18px;border-bottom:1px solid var(--line);background:var(--card)}
 .modalbody{padding:8px 18px 20px;font-size:13.5px;line-height:1.55}
 .modalbody h3{font-size:14px;margin:18px 0 6px}
 .modalbody table{margin-bottom:10px;font-size:13px}
@@ -1000,6 +1020,11 @@ tbody tr:last-child td{border-bottom:none}
     <thead><tr><th>File</th><th>Size</th><th>Actions</th></tr></thead>
     <tbody id="fbody"></tbody>
   </table>
+  <div class="ctrl" style="margin-top:10px">
+    <button id="prevpage">Previous</button>
+    <span class="muted" id="filepage">-</span>
+    <button id="nextpage">Next</button>
+  </div>
 </div>
 
 <div id="modal" class="modal">
@@ -1090,6 +1115,10 @@ var rangeFrom = 0;
 var rangeTill = 0;
 var lastRangeLoad = 0;
 var rangeInitialised = false;
+var currentTheme = "light";
+var allFiles = [];
+var filePage = 1;
+var filesPerPage = 15;
 
 function q(id){ return document.getElementById(id); }
 function getJSON(u){ return fetch(u, {cache:"no-store"}).then(function(r){ return r.json(); }); }
@@ -1160,6 +1189,11 @@ function pollStatus(){
     q("recs").textContent  = s.records;
     q("ota").textContent   = s.ota ? s.ota : "-";
     q("boot").textContent  = s.boot;
+    if (s.theme && s.theme !== currentTheme) {
+      currentTheme = s.theme;
+      document.body.className = "theme-" + currentTheme;
+      draw();
+    }
     q("ethinfo").textContent = s.ethActive
         ? (s.ethIp + " / " + s.ethMask + "  gw " + s.ethGw + (s.ethDhcp ? "  (DHCP)" : "  (static)"))
         : "not active";
@@ -1254,66 +1288,98 @@ function loadData(){
 
 function loadFiles(){
   getJSON("/api/files").then(function(d){
-    var tb = q("fbody");
-    tb.innerHTML = "";
-    (d.files || []).forEach(function(f){
-      var tr = document.createElement("tr");
-
-      var td1 = document.createElement("td");
-      td1.textContent = f.name;
-      tr.appendChild(td1);
-
-      var td2 = document.createElement("td");
-      td2.textContent = f.size + " B";
-      tr.appendChild(td2);
-
-      var td3 = document.createElement("td");
-
-      var a1 = document.createElement("a");
-      a1.textContent = "graph";
-      a1.href = "#";
-      a1.onclick = function(e){
-        e.preventDefault();
-        selFile = f.name;
-        mode = "file";
-        fromEpoch = 0; tillEpoch = 0; rangeSec = 0; rangeFrom = 0; rangeTill = 0;
-        q("from").value = ""; q("till").value = ""; q("range").value = "0";
-        lastCount = -1;
-        q("file").textContent = selFile;
-        loadData();
-      };
-      td3.appendChild(a1);
-      td3.appendChild(document.createTextNode(" | "));
-
-      var a2 = document.createElement("a");
-      a2.textContent = "download";
-      a2.href = "/download?f=" + encodeURIComponent(f.name);
-      td3.appendChild(a2);
-
-      if (f.active) {
-        td3.appendChild(document.createTextNode(" | (active)"));
-      } else {
-        td3.appendChild(document.createTextNode(" | "));
-        var a3 = document.createElement("a");
-        a3.textContent = "delete";
-        a3.className = "del";
-        a3.href = "/delete?f=" + encodeURIComponent(f.name);
-        a3.onclick = function(){ return confirm("Delete " + f.name + " ?"); };
-        td3.appendChild(a3);
-      }
-
-      tr.appendChild(td3);
-      tb.appendChild(tr);
+    allFiles = (d.files || []).slice().sort(function(a, b){
+      if (a.name < b.name) return 1;
+      if (a.name > b.name) return -1;
+      return 0;
     });
+    renderFiles();
   }).catch(function(){});
+}
+
+/* Shows up to filesPerPage files (newest first); the rest are on later pages */
+function renderFiles(){
+  var tb = q("fbody");
+  tb.innerHTML = "";
+  var pages = Math.max(1, Math.ceil(allFiles.length / filesPerPage));
+  if (filePage > pages) filePage = pages;
+  if (filePage < 1) filePage = 1;
+  var start = (filePage - 1) * filesPerPage;
+  allFiles.slice(start, start + filesPerPage).forEach(function(f){
+    var tr = document.createElement("tr");
+
+    var td1 = document.createElement("td");
+    td1.textContent = f.name;
+    tr.appendChild(td1);
+
+    var td2 = document.createElement("td");
+    td2.textContent = f.size + " B";
+    tr.appendChild(td2);
+
+    var td3 = document.createElement("td");
+
+    var a1 = document.createElement("a");
+    a1.textContent = "graph";
+    a1.href = "#";
+    a1.onclick = function(e){
+      e.preventDefault();
+      selFile = f.name;
+      mode = "file";
+      fromEpoch = 0; tillEpoch = 0; rangeSec = 0; rangeFrom = 0; rangeTill = 0;
+      q("from").value = ""; q("till").value = ""; q("range").value = "0";
+      lastCount = -1;
+      q("file").textContent = selFile;
+      loadData();
+    };
+    td3.appendChild(a1);
+    td3.appendChild(document.createTextNode(" | "));
+
+    var a2 = document.createElement("a");
+    a2.textContent = "download";
+    a2.href = "/download?f=" + encodeURIComponent(f.name);
+    td3.appendChild(a2);
+
+    if (f.active) {
+      td3.appendChild(document.createTextNode(" | (active)"));
+    } else {
+      td3.appendChild(document.createTextNode(" | "));
+      var a3 = document.createElement("a");
+      a3.textContent = "delete";
+      a3.className = "del";
+      a3.href = "/delete?f=" + encodeURIComponent(f.name);
+      a3.onclick = function(){ return confirm("Delete " + f.name + " ?"); };
+      td3.appendChild(a3);
+    }
+
+    tr.appendChild(td3);
+    tb.appendChild(tr);
+  });
+  q("filepage").textContent = "Page " + filePage + " / " + pages + "   (" + allFiles.length + " files)";
+  q("prevpage").disabled = (filePage <= 1);
+  q("nextpage").disabled = (filePage >= pages);
+}
+
+/* Colour palette per theme (also used for the exported PNG) */
+function palette(){
+  if (currentTheme === "dark") {
+    return {bg:"#171d26", grid:"#2a3342", axis:"#5b6a80", label:"#94a3b8", text:"#e7ebf2",
+            pm1:"#22c55e", pm25:"#f97316", pm10:"#ef4444"};
+  }
+  if (currentTheme === "contrast") {
+    return {bg:"#000000", grid:"#3a3a3a", axis:"#ffffff", label:"#ffd400", text:"#ffffff",
+            pm1:"#00ff66", pm25:"#ffcc00", pm10:"#ff3b30"};
+  }
+  return {bg:"#ffffff", grid:"#e6e8eb", axis:"#aaa", label:"#666", text:"#333",
+          pm1:"#16a34a", pm25:"#ea580c", pm10:"#dc2626"};
 }
 
 /* Draw the chart into the given context */
 function drawChart(g, L, T, pw, ph, data, fs, lw){
   g.font = fs + "px Arial";
+  var pal = palette();
 
   if (!data.length) {
-    g.fillStyle = "#888";
+    g.fillStyle = pal.label;
     g.fillText("No records in the selected range.", L, T + fs + 4);
     return;
   }
@@ -1327,8 +1393,8 @@ function drawChart(g, L, T, pw, ph, data, fs, lw){
   function X(tt){ return L + (tt - xmin) * pw / (xmax - xmin); }
   function Y(vv){ return T + ph - vv * ph / ymax; }
 
-  g.strokeStyle = "#e6e8eb";
-  g.fillStyle = "#666";
+  g.strokeStyle = pal.grid;
+  g.fillStyle = pal.label;
   g.lineWidth = 1;
   for (i = 0; i <= 4; i++) {
     v = ymax * i / 4; y = Y(v);
@@ -1341,7 +1407,7 @@ function drawChart(g, L, T, pw, ph, data, fs, lw){
     g.textAlign = "center"; g.fillText(fmtAxis(Math.round(t), xmax - xmin), x, T + ph + fs + 4);
   }
 
-  g.strokeStyle = "#aaa";
+  g.strokeStyle = pal.axis;
   g.beginPath(); g.moveTo(L, T); g.lineTo(L, T + ph); g.lineTo(L + pw, T + ph); g.stroke();
 
   /* Y axis title */
@@ -1349,14 +1415,14 @@ function drawChart(g, L, T, pw, ph, data, fs, lw){
   g.translate(fs * 0.95, T + ph / 2);
   g.rotate(-Math.PI / 2);
   g.textAlign = "center";
-  g.fillStyle = "#666";
+  g.fillStyle = pal.label;
   g.fillText("\u00b5g/m\u00b3", 0, 0);
   g.restore();
 
   var series = [
-    {idx:1, col:"#16a34a", name:"PM1.0"},
-    {idx:2, col:"#ea580c", name:"PM2.5"},
-    {idx:3, col:"#dc2626", name:"PM10"}
+    {idx:1, col:pal.pm1,  name:"PM1.0"},
+    {idx:2, col:pal.pm25, name:"PM2.5"},
+    {idx:3, col:pal.pm10, name:"PM10"}
   ];
 
   series.forEach(function(s){
@@ -1379,7 +1445,7 @@ function drawChart(g, L, T, pw, ph, data, fs, lw){
   var lx = L;
   series.forEach(function(s){
     g.fillStyle = s.col; g.fillRect(lx, T - fs*1.4, fs*0.9, fs*0.9);
-    g.fillStyle = "#333"; g.textAlign = "left";
+    g.fillStyle = pal.text; g.textAlign = "left";
     g.fillText(s.name, lx + fs*1.2, T - fs*0.5);
     lx += fs * 6.4;
   });
@@ -1413,10 +1479,11 @@ function exportPNG(){
   cv.width = w; cv.height = h;
   var g = cv.getContext("2d");
 
-  g.fillStyle = "#ffffff"; g.fillRect(0, 0, w, h);
-  g.fillStyle = "#222"; g.font = "bold 20px Arial"; g.textAlign = "left";
+  var pal = palette();
+  g.fillStyle = pal.bg; g.fillRect(0, 0, w, h);
+  g.fillStyle = pal.text; g.font = "bold 20px Arial"; g.textAlign = "left";
   g.fillText("PMS5003 - " + (mode === "range" ? "history" : selFile), 24, 34);
-  g.font = "14px Arial"; g.fillStyle = "#555";
+  g.font = "14px Arial"; g.fillStyle = pal.label;
   g.fillText("Range: " + rangeLabel() + "  |  records: " + d.length +
              "  |  time source: " + srcLabel +
              "  |  exported: " + new Date().toLocaleString(), 24, 58);
@@ -1503,6 +1570,8 @@ window.addEventListener("load", function(){
   q("apply").onclick = applyCustomRange;
   q("clear").onclick = clearRanges;
   q("png").onclick = exportPNG;
+  q("prevpage").onclick = function(){ filePage--; renderFiles(); };
+  q("nextpage").onclick = function(){ filePage++; renderFiles(); };
 
   /* Modal with reference values */
   q("help").onclick = function(e){ e.preventDefault(); q("modal").className = "modal open"; };
@@ -1555,7 +1624,9 @@ static void handleAdminGet() {
   h += F("<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">");
   h += F("<title>Administration - ESP32-POE2</title><style>");
   h += FPSTR(ADMIN_STYLE);
-  h += F("</style></head><body><div class=\"card\">");
+  h += F("</style></head><body class=\"theme-");
+  h += String(settings.theme);
+  h += F("\"><div class=\"card\">");
   h += F("<h1>Device administration <a href=\"/\">&larr; back to graph</a></h1>");
 
   // --- form 1: network settings ---
@@ -1597,6 +1668,20 @@ static void handleAdminGet() {
   h += F("<p class=\"muted\">Saving network settings restarts the device.</p>");
   h += F("<p><button type=\"submit\">Save network and restart</button></p>");
   h += F("</form>");
+
+  // --- display / theme ---
+  h += F("<hr><h3>Display</h3>");
+  h += F("<form method=\"POST\" action=\"/admin\">");
+  h += F("<input type=\"hidden\" name=\"action\" value=\"display\">");
+  h += F("<p>Theme: <select name=\"theme\">");
+  h += F("<option value=\"light\"");
+  if (strcmp(settings.theme, "light") == 0) h += F(" selected");
+  h += F(">Light</option><option value=\"dark\"");
+  if (strcmp(settings.theme, "dark") == 0) h += F(" selected");
+  h += F(">Dark</option><option value=\"contrast\"");
+  if (strcmp(settings.theme, "contrast") == 0) h += F(" selected");
+  h += F(">High contrast</option></select> ");
+  h += F("<button type=\"submit\">Save theme</button></p></form>");
 
   // --- form 2: manual time ---
   // --- firmware update ---
@@ -1663,6 +1748,18 @@ static void handleAdminPost() {
     }
   }
 
+  // Display theme
+  if (action == "display") {
+    String th = server.arg("theme");
+    if (th == "light" || th == "dark" || th == "contrast") {
+      strlcpy(settings.theme, th.c_str(), sizeof(settings.theme));
+      saveSettings();
+      message = F("Theme saved.");
+    } else {
+      message = F("Invalid theme.");
+    }
+  }
+
   // Network settings
   if (action == "network") {
     bool changed = false;
@@ -1716,7 +1813,9 @@ static void handleAdminPost() {
   h += F("<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">");
   h += F("<title>Administration</title><style>");
   h += FPSTR(ADMIN_STYLE);
-  h += F("</style></head><body><div class=\"card\"><h1>");
+  h += F("</style></head><body class=\"theme-");
+  h += String(settings.theme);
+  h += F("\"><div class=\"card\"><h1>");
   h += message;
   h += F("</h1><p><a href=\"/\">back to graph</a> &nbsp;|&nbsp; <a href=\"/admin\">administration</a></p>");
   h += F("</div></body></html>");
@@ -1774,6 +1873,7 @@ static void handleStatus() {
 #else
   j += ",\"ota\":\"disabled\"";
 #endif
+  j += ",\"theme\":\"";   j += String(settings.theme); j += "\"";
 
   j += ",\"current\":{";
   if (haveSample) {
