@@ -1,48 +1,47 @@
-# ESP32-POE2 — PMS5003 logger s web suceljem i administracijom
+# ESP32-POE2 — PMS5003 logger with web UI and administration
 
-Mjerenje krutih cestica (PM1.0 / PM2.5 / PM10) senzorom **PMS5003** na ploci
-**Olimex ESP32-POE2**: zapis na ugrađenu microSD karticu, NTP vrijeme,
-web stranica s grafom, Wi-Fi pristupna tocka i administracija uredjaja.
+Particulate matter measurement (PM1.0 / PM2.5 / PM10) with a **PMS5003** sensor
+on an **Olimex ESP32-POE2**: logging to the onboard microSD card, NTP time,
+a web page with a chart, a Wi-Fi access point and device administration.
 
-## Hardver
+## Hardware
 
-| Sklop | Detalji |
+| Part | Details |
 |---|---|
-| Ploca | Olimex ESP32-POE2 (ESP32-WROVER-E, 4 MB flash, 8 MB PSRAM) |
+| Board | Olimex ESP32-POE2 (ESP32-WROVER-E, 4 MB flash, 8 MB PSRAM) |
 | Ethernet | LAN8720: PHY addr 0, MDC=GPIO23, MDIO=GPIO18, POWER=GPIO12, CLK=GPIO0 |
-| microSD | ugradjeni utor, 1-bit SDMMC: CLK=GPIO14, CMD=GPIO15, D0=GPIO2 |
-| PMS5003 | VCC=5V, GND, TX=GPIO33 (RX ploce), RX=GPIO13 (TX ploce, opcionalno) |
-| Wi-Fi | softAP (pristupna tocka), zadano `esp32-poe2-pms` |
+| microSD | onboard slot, 1-bit SDMMC: CLK=GPIO14, CMD=GPIO15, D0=GPIO2 |
+| PMS5003 | VCC=5V, GND, TX=GPIO33 (board RX), RX=GPIO13 (board TX, optional) |
+| Wi-Fi | softAP, default `esp32-poe2-pms` |
 
-Pinovi koje ne koristiti: GPIO16/17 (PSRAM), GPIO18/23 (Ethernet), GPIO12
-(PHY power), GPIO0 (ETH clock), GPIO14/15/2 (SD), GPIO1/3 (USB serijski),
-GPIO34-39 (samo ulaz).
+Pins not to use: GPIO16/17 (PSRAM), GPIO18/23 (Ethernet), GPIO12 (PHY power),
+GPIO0 (ETH clock), GPIO14/15/2 (SD), GPIO1/3 (USB serial), GPIO34-39 (input only).
 
-> **Napajanje:** POE2 nema galvansku izolaciju izmedju PoE napajanja i USB-a.
-> Pri programiranju preko USB-a iskljuci Ethernet kabel ako se ploca napaja
-> preko PoE-a.
+> **Power:** the POE2 has no galvanic isolation between PoE power and USB.
+> Disconnect the Ethernet cable while programming over USB if the board is
+> powered over PoE.
 
-## Funkcije
+## Features
 
-- PMS5003 se cita preko `Serial2` (9600 8N1), 32-bajtni okvir s headerom
-  `0x42 0x4D` i checksumom; parser se sam poravnava na header i broji
-  prihvacene/odbacene okvire.
-- Zapis u CSV **samo kad se PM2.5 ili PM10 promijeni**.
-- Datoteka po datumu i vremenu kreiranja: `/pms_YYYYMMDD_HHMMSS.csv`, uz
-  **automatsku rotaciju u ponoc** bez restarta ploce.
-- Vrijeme: **NTP** ako je mreza dostupna, **RUCNO** ako je vrijeme postavljeno
-  u administraciji, inace **MILLIS** (uvijek zapisano u stupcu `time_source`).
-- Ethernet (DHCP ili staticni IP) + **Wi-Fi pristupna tocka** (SSID, lozinka,
-  kanal); web i OTA rade na obje mreze.
-- Web stranica: graf s filtrima raspona (5 min … 24 h + vlastiti `od–do`),
-  izvoz grafa u PNG, trenutne vrijednosti, indikator svjezine senzora,
-  popis datoteka s preuzimanjem i brisanjem, pomoc s referentnim
-  vrijednostima PM i zaglavlje s mreznim postavkama i vremenom pokretanja.
-- **Administracija** na `/admin`: mrezne postavke (Ethernet, AP, NTP) i rucno
-  postavljanje vremena. Postavke se pamte u NVS (`Preferences`), promjena
-  mreze restarta uredjaj.
-- **OTA** update preko mreze (ArduinoOTA, hostname `esp32-poe2-pms`).
-- Serijski ispis je iskljucen (`SERIAL_DEBUG 0`).
+- PMS5003 is read over `Serial2` (9600 8N1), 32-byte frames with the `0x42 0x4D`
+  header and a checksum; the parser re-syncs on the header and counts accepted
+  and rejected frames.
+- CSV logging **only when PM2.5 or PM10 changes**.
+- One file per creation date and time: `/pms_YYYYMMDD_HHMMSS.csv`, with
+  **automatic rotation at midnight** and no board restart.
+- Time: **NTP** when the network is available, **MANUAL** when set from the
+  administration page, otherwise **MILLIS** (always recorded in `time_source`).
+- Ethernet (DHCP or static IP) plus a **Wi-Fi access point** (SSID, password,
+  channel); web UI and OTA work on both networks.
+- Web page: chart with range filters (last 5 min … last 24 h, plus a custom
+  from-to range), PNG export, current values, sensor freshness indicator,
+  file list with download and delete, a help modal with reference PM values,
+  and a header showing wired/wireless network settings and the boot time.
+- **Administration** at `/admin`: network settings (Ethernet, AP, NTP) and
+  manual time setting. Settings are stored in NVS (`Preferences`) and survive
+  a restart; changing network settings restarts the device.
+- **OTA** update over the network (ArduinoOTA, hostname `esp32-poe2-pms`).
+- Serial output is disabled (`SERIAL_DEBUG 0`).
 
 ## CSV format
 
@@ -51,51 +50,57 @@ timestamp,time_source,pm1_0,pm2_5,pm10
 1789733325,NTP,3,7,7
 ```
 
-`timestamp` je Unix epoch (UTC) kad vrijeme ima epoch (NTP ili RUCNO),
-inace `millis()`.
+`timestamp` is a Unix epoch (UTC) when the clock has a valid epoch (NTP or
+MANUAL), otherwise `millis()`.
 
-## Web krajnje tocke
+## Web endpoints
 
-| Putanja | Namjena |
+| Path | Purpose |
 |---|---|
-| `/` | HTML stranica s grafom |
-| `/admin` | administracija (GET prikaz, POST spremanje) |
-| `/api/status` | JSON: vrijeme, mreze, zapisi, trenutne vrijednosti, OTA |
-| `/api/data?f=` | JSON zapisi za graf |
-| `/api/files` | popis datoteka na kartici |
-| `/download?f=` | skidanje datoteke |
-| `/delete?f=` | brisanje datoteke (aktivna je zasticena) |
+| `/` | HTML page with the chart |
+| `/admin` | administration (GET shows the form, POST saves) |
+| `/api/status` | JSON: time, networks, records, current values, OTA |
+| `/api/data?f=` | JSON records of a single file |
+| `/api/data?from=&to=` | JSON records across all files covering a range |
+| `/api/files` | JSON list of files on the card |
+| `/download?f=` | download a file |
+| `/delete?f=` | delete a file (the active one is protected) |
 
-## Build i upload
+## Build and upload
 
-U Arduino jezgri 3.3.11 ne postoji ploca `esp32-poe2`, pa se koristi WROVER
-cilj s ukljucenim PSRAM-om:
+Arduino core 3.3.11 has no board named `esp32-poe2`, so a WROVER target with
+PSRAM enabled is used. Because the Wi-Fi library makes the application large
+(~1.19 MB), the `min_spiffs` partition scheme (1.9 MB app partition) is
+required for comfortable OTA headroom:
 
 ```sh
-arduino-cli compile --fqbn esp32:esp32:esp32wrover arduino/pms5003_poe2_logger
-arduino-cli upload  --fqbn esp32:esp32:esp32wrover -p COM4 arduino/pms5003_poe2_logger
+arduino-cli compile --fqbn esp32:esp32:esp32wrover:PartitionScheme=min_spiffs \
+    arduino/pms5003_poe2_logger
+arduino-cli upload  --fqbn esp32:esp32:esp32wrover:PartitionScheme=min_spiffs \
+    -p COM4 arduino/pms5003_poe2_logger
 ```
 
-OTA (bez USB kabela):
+OTA (no USB cable needed):
 
 ```sh
-arduino-cli upload --fqbn esp32:esp32:esp32wrover --protocol network \
-    -p <IP_ploce> arduino/pms5003_poe2_logger
+arduino-cli upload --fqbn esp32:esp32:esp32wrover:PartitionScheme=min_spiffs \
+    --protocol network -p <board_IP> arduino/pms5003_poe2_logger
 ```
 
-## Skice u repozitoriju
+## Sketches in this repository
 
-| Skica | Namjena |
+| Sketch | Purpose |
 |---|---|
-| `arduino/pms5003_poe2_logger` | glavna skica: PMS5003 + SD + NTP + web + AP + OTA |
-| `arduino/esp32_poe_test` | najosnovniji test: blink + serijski ispis |
-| `arduino/esp32_poe_eth_test` | test Etherneta (LAN8720, DHCP) |
+| `arduino/pms5003_poe2_logger` | main sketch: PMS5003 + SD + NTP + web + AP + OTA |
+| `arduino/esp32_poe_test` | minimal test: blink + serial output |
+| `arduino/esp32_poe_eth_test` | Ethernet test (LAN8720, DHCP) |
 
-## Zadane vrijednosti
+## Defaults
 
-| Postavka | Zadano |
+| Setting | Default |
 |---|---|
 | Ethernet | DHCP |
-| Wi-Fi AP | ukljucen, `esp32-poe2-pms`, WPA2 `pms5003pms`, kanal 6 |
+| Wi-Fi AP | enabled, `esp32-poe2-pms`, WPA2 `pms5003pms`, channel 6 |
 | NTP server | `pool.ntp.org` |
-| Vremenska zona | `CET-1CEST,M3.5.0,M10.5.0/3` (samo za ime datoteke i prikaz) |
+| Time zone | `CET-1CEST,M3.5.0,M10.5.0/3` (file names and page display only) |
+| Chart range | last 5 minutes |
