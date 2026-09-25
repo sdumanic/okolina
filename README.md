@@ -1,8 +1,14 @@
-# ESP32-POE2 — PMS5003 logger with web UI and administration
+﻿# ESP32-POE2 â€” PMS5003 logger with web UI and administration
 
 Particulate matter measurement (PM1.0 / PM2.5 / PM10) with a **PMS5003** sensor
 on an **Olimex ESP32-POE2**: logging to the onboard microSD card, NTP time,
 a web page with a chart, a Wi-Fi access point and device administration.
+
+![Web interface](docs/screenshot.png)
+
+*Web interface: network status and boot time in the header, chart with range
+filters (last 5 min by default, custom from-to range), current values with the
+sensor freshness indicator, and the file list with download/delete actions.*
 
 ## Hardware
 
@@ -33,7 +39,7 @@ GPIO0 (ETH clock), GPIO14/15/2 (SD), GPIO1/3 (USB serial), GPIO34-39 (input only
   administration page, otherwise **MILLIS** (always recorded in `time_source`).
 - Ethernet (DHCP or static IP) plus a **Wi-Fi access point** (SSID, password,
   channel); web UI and OTA work on both networks.
-- Web page: chart with range filters (last 5 min … last 24 h, plus a custom
+- Web page: chart with range filters (last 5 min â€¦ last 24 h, plus a custom
   from-to range), PNG export, current values, sensor freshness indicator,
   file list with download and delete, a help modal with reference PM values,
   and a header showing wired/wireless network settings and the boot time.
