@@ -1,24 +1,24 @@
 /*
-  Test skica: blink + ispis na serijski port
+  Test sketch: blink + serial output
 
-  Ploca:  Olimex ESP32-POE2 (i ESP32-POE)
-  FQBN:   esp32:esp32:esp32wrover (PSRAM ukljucen)
+  Board:  Olimex ESP32-POE2 (and ESP32-POE)
+  FQBN:   esp32:esp32:esp32wrover (PSRAM enabled)
 
-  Ponasanje:
-    - Blinka na LED_PIN svakih BLINK_MS milisekundi
-    - Pri svakoj promjeni ispise stanje i dijagnostiku na serijski port
+  Behaviour:
+    - Blinks on LED_PIN every BLINK_MS milliseconds
+    - Prints state and diagnostics to the serial port on every change
       (115200 baud, 8N1)
 
-  Napomena o LED pinu:
-    Arduino jezgra ne definira LED_BUILTIN za ove ploce, a POE2 nema
-    korisnicku LEDicu na ploci. GPIO4 je pin koji Olimex koristi u svom
-    sluzbenom blink primjeru i izveden je na EXT konektoru.
-    Za vidljiv blink spoji vanjski LED + serijski otpornik (npr. 330R)
-    izmedju GPIO4 i GND.
+  Note about the LED pin:
+    The Arduino core does not define LED_BUILTIN for these boards and the POE2
+    has no user LED on the board. GPIO4 is the pin Olimex uses in its official
+    blink example and it is available on the EXT connector.
+    For a visible blink connect an external LED + series resistor (e.g. 330R)
+    between GPIO4 and GND.
 
-  Rezervirani pinovi (ne dirati):
+  Reserved pins (do not use):
     GPIO12 PHY power, GPIO0 ETH clock, GPIO18 ETH MDIO, GPIO23 ETH MDC,
-    GPIO14/15/2 microSD, GPIO16/17 PSRAM, GPIO1/3 USB-serial
+    GPIO14/15/2 microSD, GPIO16/17 PSRAM, GPIO1/3 USB serial
 */
 
 #define LED_PIN          4
@@ -26,9 +26,9 @@
 #define SERIAL_BAUD      115200
 #define BLINK_MS         500
 
-static uint32_t brojPromjena = 0;
-static uint32_t zadnjaPromjena = 0;
-static bool     ledStanje = false;
+static uint32_t changeCount = 0;
+static uint32_t lastChange = 0;
+static bool     ledState = false;
 
 void setup() {
   Serial.begin(SERIAL_BAUD);
@@ -48,7 +48,7 @@ void setup() {
     Serial.print(ESP.getPsramSize() / 1024);
     Serial.println(" KB");
   } else {
-    Serial.println("nije aktiviran");
+    Serial.println("not enabled");
   }
   Serial.print("Free heap:    "); Serial.print(ESP.getFreeHeap()); Serial.println(" B");
   Serial.print("SDK:          "); Serial.println(ESP.getSdkVersion());
@@ -58,24 +58,24 @@ void setup() {
 }
 
 void loop() {
-  uint32_t sada = millis();
+  uint32_t now = millis();
 
-  if (sada - zadnjaPromjena >= BLINK_MS) {
-    zadnjaPromjena = sada;
-    ledStanje = !ledStanje;
-    digitalWrite(LED_PIN, LED_ACTIVE_HIGH ? ledStanje : !ledStanje);
-    brojPromjena++;
+  if (now - lastChange >= BLINK_MS) {
+    lastChange = now;
+    ledState = !ledState;
+    digitalWrite(LED_PIN, LED_ACTIVE_HIGH ? ledState : !ledState);
+    changeCount++;
 
     Serial.print("[");
-    Serial.print(sada);
-    Serial.print(" ms] promjena #");
-    Serial.print(brojPromjena);
+    Serial.print(now);
+    Serial.print(" ms] change #");
+    Serial.print(changeCount);
     Serial.print("  LED=");
-    Serial.print(ledStanje ? "ON " : "OFF");
+    Serial.print(ledState ? "ON " : "OFF");
     Serial.print("  heap=");
     Serial.print(ESP.getFreeHeap());
     Serial.print(" B  uptime=");
-    Serial.print(sada / 1000UL);
+    Serial.print(now / 1000UL);
     Serial.println(" s");
   }
 }
