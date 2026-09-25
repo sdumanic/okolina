@@ -1,4 +1,4 @@
-/*
+﻿/*
   ESP32-POE2 + PMS5003 + microSD + NTP + web server + Wi-Fi AP
   ============================================================
 
@@ -73,6 +73,7 @@
 #include <ArduinoOTA.h>
 #include <WiFi.h>
 #include <Preferences.h>
+#include <Update.h>
 #include <sys/time.h>
 #include <time.h>
 
@@ -1598,6 +1599,16 @@ static void handleAdminGet() {
   h += F("</form>");
 
   // --- form 2: manual time ---
+  // --- firmware update ---
+  h += F("<h3>Firmware update</h3>");
+  h += F("<p class=\"muted\">Upload a compiled .bin file. Do not power off the device during the update.</p>");
+  h += F("<form method=\"POST\" action=\"/update\" enctype=\"multipart/form-data\">");
+  h += F("<p><input type=\"file\" name=\"firmware\" accept=\".bin\"> <button type=\"submit\">Upload firmware</button></p>");
+  h += F("</form>");
+  h += F("<p class=\"muted\">ArduinoOTA hostname: ");
+  h += String(OTA_HOSTNAME);
+  h += F(", port 3232.</p>");
+
   h += F("<hr><h3>Manual time setting</h3>");
   h += F("<p class=\"muted\">Used when NTP is not available. The time is not kept across a restart.</p>");
   h += F("<form method=\"POST\" action=\"/admin\">");
@@ -1966,6 +1977,42 @@ static void handleFavicon() {
   server.send(204, "text/plain", "");
 }
 
+
+// HTTP firmware update (independent of ArduinoOTA, works from a browser)
+static void handleUpdateDone() {
+  if (Update.hasError()) {
+    server.send(500, "text/plain", String("Update failed: ") + Update.errorString());
+  } else {
+    server.send(200, "text/html",
+                "<meta http-equiv=\"refresh\" content=\"12;url=/\">"
+                "<h3>Update OK, the device is restarting...</h3>");
+    delay(300);
+    ESP.restart();
+  }
+}
+
+static void handleUpdateUpload() {
+  HTTPUpload &up = server.upload();
+  if (up.status == UPLOAD_FILE_START) {
+    SLOG.print("[OTA] HTTP update: ");
+    SLOG.println(up.filename);
+    if (!Update.begin(UPDATE_SIZE_UNKNOWN)) {
+      SLOG.print("[OTA] begin failed: ");
+      SLOG.println(Update.errorString());
+    }
+  } else if (up.status == UPLOAD_FILE_WRITE) {
+    if (Update.write(up.buf, up.currentSize) != up.currentSize) {
+      SLOG.print("[OTA] write failed: ");
+      SLOG.println(Update.errorString());
+    }
+  } else if (up.status == UPLOAD_FILE_END) {
+    if (!Update.end(true)) {
+      SLOG.print("[OTA] end failed: ");
+      SLOG.println(Update.errorString());
+    }
+  }
+}
+
 static void startWebServer() {
   server.on("/", handleRoot);
   server.on("/admin", HTTP_GET,  handleAdminGet);
@@ -1975,6 +2022,7 @@ static void startWebServer() {
   server.on("/api/files", handleFiles);
   server.on("/download", handleDownload);
   server.on("/delete", handleDelete);
+  server.on("/update", HTTP_POST, handleUpdateDone, handleUpdateUpload);
   server.on("/favicon.ico", handleFavicon);
   server.onNotFound([]() {
     server.send(404, "text/plain", "Unknown path.");
@@ -2032,6 +2080,11 @@ void setup() {
   }
 
   // ---------- 4. Wi-Fi AP ----------
+
+  // Make Ethernet the default interface so OTA/UDP sockets bind to it
+  if (ethActive) {
+    ETH.setDefault();
+  }
   startAP();
 
   // ---------- 5. NTP ----------
