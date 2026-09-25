@@ -1,21 +1,21 @@
 /*
-  Ethernet test: LAN8720 + DHCP + status na serijskom portu
+  Ethernet test: LAN8720 + DHCP + status on the serial port
 
-  Ploca:  Olimex ESP32-POE2 (i ESP32-POE)
-  FQBN:   esp32:esp32:esp32wrover (PSRAM ukljucen)
+  Board:  Olimex ESP32-POE2 (and ESP32-POE)
+  FQBN:   esp32:esp32:esp32wrover (PSRAM enabled)
 
-  Ponasanje:
-    - Blinka na GPIO4 svakih 500 ms
-    - Podize Ethernet (LAN8720, addr 0, MDC=23, MDIO=18, POWER=12)
-    - DHCP: ispise IP, masku, gateway i DNS kad ih dobije
-    - Svakih 5 s ispise status; odmah ispise svaku promjenu linka ili IP-a
+  Behaviour:
+    - Blinks on GPIO4 every 500 ms
+    - Brings up Ethernet (LAN8720, addr 0, MDC=23, MDIO=18, POWER=12)
+    - DHCP: prints IP, netmask, gateway and DNS once obtained
+    - Prints status every 5 s; prints every link or IP change immediately
 
-  Vazno za POE2: Ethernet clock je GPIO0 (CLK_OUT) jer su GPIO16/17 zauzeti
-  PSRAM-om. Na ESP32-POE (WROOM) clock je GPIO17. Zato se ovdje vrijednosti
-  zadaju eksplicitno, ne preko makroa varijante.
+  Important for POE2: the Ethernet clock is GPIO0 (CLK_OUT) because GPIO16/17
+  are used by PSRAM. On the ESP32-POE (WROOM) the clock is GPIO17. Therefore
+  the values are set explicitly here instead of relying on variant macros.
 
-  Napomena: ploca nema galvansku izolaciju od PoE napajanja - pri
-  programiranju preko USB-a iskljuci Ethernet kabel ako je prisutan PoE.
+  Note: the board has no galvanic isolation from PoE power - disconnect the
+  Ethernet cable while programming over USB if PoE is present.
 */
 
 #include <ETH.h>
@@ -28,18 +28,18 @@
 #define BLINK_MS         500
 #define STATUS_MS        5000
 
-static bool      zadnjiLink = false;
-static IPAddress zadnjaIP(0, 0, 0, 0);
-static uint32_t  brojPromjena = 0;
-static uint32_t  zadnjaPromjena = 0;
-static uint32_t  zadnjiStatus = 0;
-static bool      ledStanje = false;
+static bool      lastLink = false;
+static IPAddress lastIp(0, 0, 0, 0);
+static uint32_t  blinkCount = 0;
+static uint32_t  lastBlink = 0;
+static uint32_t  lastStatus = 0;
+static bool      ledState = false;
 
-static void ispisiStatus(const char *dogadjaj) {
+static void printStatus(const char *event) {
   Serial.print("[");
   Serial.print(millis());
   Serial.print(" ms] ");
-  Serial.print(dogadjaj);
+  Serial.print(event);
   Serial.print(" | link=");
   Serial.print(ETH.linkUp() ? "UP" : "DOWN");
   if (ETH.linkUp()) {
@@ -65,8 +65,7 @@ void setup() {
   Serial.println();
   Serial.println("=== Olimex ESP32-POE Ethernet test ===");
   Serial.print("Chip:      "); Serial.println(ESP.getChipModel());
-  Serial.print("PHY:       LAN8720  addr=0");
-  Serial.println();
+  Serial.println("PHY:       LAN8720  addr=0");
   Serial.println("MDC:       GPIO23");
   Serial.println("MDIO:      GPIO18");
   Serial.println("PHY power: GPIO12");
@@ -89,49 +88,49 @@ void setup() {
     ETH.setHostname("esp32-poe-eth-test");
     Serial.print("MAC:         ");
     Serial.println(ETH.macAddress());
-    Serial.println("Cekam link i DHCP...");
+    Serial.println("Waiting for link and DHCP...");
   }
   Serial.println();
 }
 
 void loop() {
-  uint32_t sada = millis();
+  uint32_t now = millis();
 
-  if (sada - zadnjaPromjena >= BLINK_MS) {
-    zadnjaPromjena = sada;
-    ledStanje = !ledStanje;
-    digitalWrite(LED_PIN, LED_ACTIVE_HIGH ? ledStanje : !ledStanje);
-    brojPromjena++;
+  if (now - lastBlink >= BLINK_MS) {
+    lastBlink = now;
+    ledState = !ledState;
+    digitalWrite(LED_PIN, LED_ACTIVE_HIGH ? ledState : !ledState);
+    blinkCount++;
     Serial.print("[");
-    Serial.print(sada);
+    Serial.print(now);
     Serial.print(" ms] blink #");
-    Serial.print(brojPromjena);
+    Serial.print(blinkCount);
     Serial.print("  LED=");
-    Serial.print(ledStanje ? "ON " : "OFF");
+    Serial.print(ledState ? "ON " : "OFF");
     Serial.print("  uptime=");
-    Serial.print(sada / 1000UL);
+    Serial.print(now / 1000UL);
     Serial.println(" s");
   }
 
   bool link = ETH.linkUp();
-  if (link != zadnjiLink) {
-    zadnjiLink = link;
-    ispisiStatus(link ? "LINK UP" : "LINK DOWN");
+  if (link != lastLink) {
+    lastLink = link;
+    printStatus(link ? "LINK UP" : "LINK DOWN");
   }
 
   IPAddress ip = ETH.localIP();
-  if (ip != zadnjaIP) {
-    zadnjaIP = ip;
+  if (ip != lastIp) {
+    lastIp = ip;
     if (ETH.localIP() != IPAddress(0, 0, 0, 0)) {
-      ispisiStatus("IP PROMJENA");
-      Serial.print("           maska:   "); Serial.println(ETH.subnetMask());
+      printStatus("IP CHANGE");
+      Serial.print("           mask:    "); Serial.println(ETH.subnetMask());
       Serial.print("           gateway: "); Serial.println(ETH.gatewayIP());
       Serial.print("           dns:     "); Serial.println(ETH.dnsIP(0));
     }
   }
 
-  if (sada - zadnjiStatus >= STATUS_MS) {
-    zadnjiStatus = sada;
-    ispisiStatus("status");
+  if (now - lastStatus >= STATUS_MS) {
+    lastStatus = now;
+    printStatus("status");
   }
 }
