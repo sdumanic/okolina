@@ -1,4 +1,4 @@
-﻿# ESP32-POE2 â€” PMS5003 logger with web UI and administration
+# ESP32-POE2 — PMS5003 logger with web UI and administration
 
 Particulate matter measurement (PM1.0 / PM2.5 / PM10) with a **PMS5003** sensor
 on an **Olimex ESP32-POE2**: logging to the onboard microSD card, NTP time,
@@ -7,8 +7,8 @@ a web page with a chart, a Wi-Fi access point and device administration.
 ![Web interface](docs/screenshot.png)
 
 *Web interface: network status and boot time in the header, chart with range
-filters (last 5 min by default, custom from-to range), current values with the
-sensor freshness indicator, and the file list with download/delete actions.*
+filters (last 5 min by default, plus a custom from-to range), current values with
+the sensor freshness indicator, and the file list with download/delete actions.*
 
 ## Hardware
 
@@ -39,14 +39,21 @@ GPIO0 (ETH clock), GPIO14/15/2 (SD), GPIO1/3 (USB serial), GPIO34-39 (input only
   administration page, otherwise **MILLIS** (always recorded in `time_source`).
 - Ethernet (DHCP or static IP) plus a **Wi-Fi access point** (SSID, password,
   channel); web UI and OTA work on both networks.
-- Web page: chart with range filters (last 5 min â€¦ last 24 h, plus a custom
-  from-to range), PNG export, current values, sensor freshness indicator,
-  file list with download and delete, a help modal with reference PM values,
-  and a header showing wired/wireless network settings and the boot time.
-- **Administration** at `/admin`: network settings (Ethernet, AP, NTP) and
-  manual time setting. Settings are stored in NVS (`Preferences`) and survive
-  a restart; changing network settings restarts the device.
-- **OTA** update over the network (ArduinoOTA, hostname `esp32-poe2-pms`).
+- Web page: chart with range filters (last 5 min / 30 min / 1 h / 6 h / 24 h and
+  a custom from-to range), PNG export, current values, sensor freshness
+  indicator, file list with download and delete, a help modal with reference PM
+  values, and a header showing wired/wireless network settings and boot time.
+- History queries read **all files covering the selected range**, merge and sort
+  them, and decimate evenly when there are more than 3000 records.
+- The file list shows the newest 15 files per page with page navigation.
+- Three selectable themes: light, dark and high contrast (chart and PNG export
+  follow the selected theme).
+- **Administration** at `/admin`: network settings (Ethernet, AP, NTP), manual
+  time setting, theme selection and firmware upload. Settings are stored in NVS
+  (`Preferences`) and survive a restart; changing network settings restarts the
+  device.
+- Firmware update from the browser (`/admin` → **Firmware update**) as well as
+  ArduinoOTA (hostname `esp32-poe2-pms`).
 - Serial output is disabled (`SERIAL_DEBUG 0`).
 
 ## CSV format
@@ -65,19 +72,20 @@ MANUAL), otherwise `millis()`.
 |---|---|
 | `/` | HTML page with the chart |
 | `/admin` | administration (GET shows the form, POST saves) |
-| `/api/status` | JSON: time, networks, records, current values, OTA |
+| `/api/status` | JSON: time, networks, records, current values, theme, OTA name |
 | `/api/data?f=` | JSON records of a single file |
 | `/api/data?from=&to=` | JSON records across all files covering a range |
 | `/api/files` | JSON list of files on the card |
 | `/download?f=` | download a file |
 | `/delete?f=` | delete a file (the active one is protected) |
+| `/update` | firmware upload (POST, multipart) |
 
 ## Build and upload
 
 Arduino core 3.3.11 has no board named `esp32-poe2`, so a WROVER target with
 PSRAM enabled is used. Because the Wi-Fi library makes the application large
-(~1.19 MB), the `min_spiffs` partition scheme (1.9 MB app partition) is
-required for comfortable OTA headroom:
+(~1.2 MB), the `min_spiffs` partition scheme (1.9 MB app partition) is required
+for comfortable OTA headroom:
 
 ```sh
 arduino-cli compile --fqbn esp32:esp32:esp32wrover:PartitionScheme=min_spiffs \
@@ -86,11 +94,12 @@ arduino-cli upload  --fqbn esp32:esp32:esp32wrover:PartitionScheme=min_spiffs \
     -p COM4 arduino/pms5003_poe2_logger
 ```
 
-OTA (no USB cable needed):
+Firmware update over the network, no USB cable needed:
 
 ```sh
-arduino-cli upload --fqbn esp32:esp32:esp32wrover:PartitionScheme=min_spiffs \
-    --protocol network -p <board_IP> arduino/pms5003_poe2_logger
+# from the browser:  http://<board_IP>/admin  ->  Firmware update  ->  Upload firmware
+# or with curl (uses the same endpoint):
+curl -F "firmware=@pms5003_poe2_logger.ino.bin" http://<board_IP>/update
 ```
 
 ## Sketches in this repository
@@ -110,3 +119,4 @@ arduino-cli upload --fqbn esp32:esp32:esp32wrover:PartitionScheme=min_spiffs \
 | NTP server | `pool.ntp.org` |
 | Time zone | `CET-1CEST,M3.5.0,M10.5.0/3` (file names and page display only) |
 | Chart range | last 5 minutes |
+| Theme | light |
